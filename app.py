@@ -20,20 +20,12 @@ except:
 menu = ["🔍 Consultar Pantallas", "➕ Agregar Nueva", "🦴 Huesario / Partes"]
 choice = st.sidebar.radio("Menú", menu)
 
-# --- FUNCIÓN PARA CARGAR DATOS (NIVEL TÉCNICO) ---
-def cargar_datos(nombre):
-    try:
-        # Intentamos leer la hoja por nombre
-        return conn.read(worksheet=nombre, ttl=0)
-    except Exception as e:
-        return None
-
 # --- 1. PANTALLAS ---
 if choice == "🔍 Consultar Pantallas":
     st.header("Buscador de Compatibilidades")
-    df = cargar_datos("Pantallas")
-    
-    if df is not None:
+    try:
+        # Leemos la primera hoja sin importar el nombre
+        df = conn.read(ttl=0) 
         df = df.dropna(how='all')
         busqueda = st.text_input("Buscar modelo...")
         if busqueda:
@@ -41,8 +33,8 @@ if choice == "🔍 Consultar Pantallas":
             st.dataframe(df[mask], use_container_width=True, hide_index=True)
         else:
             st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.error("No se pudo cargar la hoja 'Pantallas'.")
+    except Exception as e:
+        st.error(f"Error al conectar con Google: {e}")
 
 # --- 2. AGREGAR PANTALLA ---
 elif choice == "➕ Agregar Nueva":
@@ -53,23 +45,41 @@ elif choice == "➕ Agregar Nueva":
         compat = st.text_input("Compatibles")
         notas = st.text_area("Notas")
         if st.form_submit_button("Guardar"):
-            df_act = cargar_datos("Pantallas")
-            nuevo = pd.DataFrame([{"Marca": marca, "Modelo": modelo, "Compatibles": compat, "Notas": notas}])
-            updated = pd.concat([df_act, nuevo], ignore_index=True)
-            conn.update(worksheet="Pantallas", data=updated)
-            st.success("Guardado.")
+            if marca and modelo:
+                df_act = conn.read(ttl=0)
+                nuevo = pd.DataFrame([{"Marca": marca, "Modelo": modelo, "Compatibles": compat, "Notas": notas}])
+                updated = pd.concat([df_act, nuevo], ignore_index=True)
+                conn.update(data=updated) # Actualiza la primera hoja por defecto
+                st.success("Guardado en la nube.")
+            else:
+                st.warning("Marca y Modelo obligatorios.")
 
-# --- 3. HUESARIO (SISTEMA DE DIAGNÓSTICO) ---
+# --- 3. HUESARIO (CON AUTO-DETECCIÓN) ---
 elif choice == "🦴 Huesario / Partes":
     st.header("Inventario de Partes")
     
-    df_h = cargar_datos("Huesario")
-    
-    if df_h is not None:
-        st.dataframe(df_h, use_container_width=True, hide_index=True)
-    else:
-        st.error("⚠️ Error técnico: La hoja 'Huesario' no responde.")
-        st.info("💡 **Monkey Fix Tips para solucionar esto:**")
-        st.write("1. **Escribe algo en el Excel:** Google a veces no entrega hojas que están vacías. Escribe un modelo de prueba en la segunda hoja.")
-        st.write("2. **Revisa el nombre:** Asegúrate que no tenga un espacio al final: 'Huesario ' vs 'Huesario'.")
-        st.write("3. **El Secreto:** Ve a Streamlit Cloud > Settings > Secrets y asegúrate de que el link NO termine en `#gid=...`. Debe terminar en `/edit?usp=sharing`.")
+    try:
+        # TRUCO MAESTRO: Intentamos forzar la lectura de la hoja "Huesario"
+        # Si falla, el bloque 'except' nos dirá qué está pasando.
+        df_h = conn.read(worksheet="Huesario", ttl=0)
+        
+        if df_h is not None:
+            st.dataframe(df_h, use_container_width=True, hide_index=True)
+            
+            with st.expander("➕ Registrar nuevo en Huesario"):
+                with st.form("h2"):
+                    m, mo, id_e = st.text_input("Marca"), st.text_input("Modelo"), st.text_input("ID")
+                    if st.form_submit_button("Agregar"):
+                        fecha = datetime.now().strftime("%d/%m/%Y")
+                        nueva_fila = pd.DataFrame([{"Marca": m, "Modelo": mo, "ID": id_e, "Historial": f"[{fecha}] Ingreso."}])
+                        df_updated = pd.concat([df_h, nueva_fila], ignore_index=True)
+                        conn.update(worksheet="Huesario", data=df_updated)
+                        st.success("Agregado al Huesario.")
+        
+    except Exception as e:
+        st.error("No se pudo acceder a la pestaña 'Huesario'.")
+        st.info("🔎 **Diagnóstico para Monkey Fix:**")
+        st.write("Google Sheets envió este error: ", e)
+        st.write("---")
+        st.warning("⚠️ **Casi siempre es el link de los Secrets.**")
+        st.write("Asegúrate de que el link en Streamlit Cloud > Settings > Secrets sea el link de **COMPARTIR** (el que obtienes al darle al botón azul en Google Sheets) y que NO tenga el `#gid=0` al final.")
