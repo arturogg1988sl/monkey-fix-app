@@ -4,100 +4,72 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 
-# Configuración profesional
-st.set_page_config(page_title="Monkey Fix - Sistema Técnico", page_icon="🐒", layout="wide")
+st.set_page_config(page_title="Monkey Fix System", page_icon="🐒", layout="wide")
 
 # --- CONEXIÓN ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- LOGO Y TÍTULO ---
+# --- LOGO ---
 try:
     logo = Image.open("monkey_logo.png")
     st.image(logo, width=150)
 except:
     st.title("🐒 MONKEY FIX / CELULARES 653")
-st.write("---")
 
-# --- MENÚ LATERAL ---
+# --- MENÚ ---
 menu = ["🔍 Consultar Pantallas", "➕ Agregar Nueva", "🦴 Huesario / Partes"]
-choice = st.sidebar.radio("Menú de Trabajo", menu)
+choice = st.sidebar.radio("Menú", menu)
 
-# --- FUNCIÓN DE LECTURA ROBUSTA ---
-def cargar_datos_seguro(nombre_hoja, indice_hoja):
+# --- FUNCIÓN PARA CARGAR DATOS (NIVEL TÉCNICO) ---
+def cargar_datos(nombre):
     try:
-        # Intento 1: Por nombre exacto
-        return conn.read(worksheet=nombre_hoja, ttl=0)
-    except:
-        try:
-            # Intento 2: Por posición (0 es la primera, 1 es la segunda)
-            # Nota: Algunas versiones de la librería requieren leer todo y filtrar
-            all_sheets = conn.read(ttl=0) 
-            return conn.read(worksheet=indice_hoja, ttl=0)
-        except:
-            return pd.DataFrame() # Devuelve tabla vacía si nada funciona
+        # Intentamos leer la hoja por nombre
+        return conn.read(worksheet=nombre, ttl=0)
+    except Exception as e:
+        return None
 
-# --- 1. CONSULTA PANTALLAS ---
+# --- 1. PANTALLAS ---
 if choice == "🔍 Consultar Pantallas":
     st.header("Buscador de Compatibilidades")
-    df = cargar_datos_seguro("Pantallas", 0)
-    df = df.dropna(how='all')
-
-    busqueda = st.text_input("Ingresa modelo a buscar:", placeholder="Ejemplo: iPhone 11...")
-    if busqueda:
-        mask = df.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)
-        resultado = df[mask]
-        st.dataframe(resultado, use_container_width=True, hide_index=True)
+    df = cargar_datos("Pantallas")
+    
+    if df is not None:
+        df = df.dropna(how='all')
+        busqueda = st.text_input("Buscar modelo...")
+        if busqueda:
+            mask = df.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)
+            st.dataframe(df[mask], use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.error("No se pudo cargar la hoja 'Pantallas'.")
 
 # --- 2. AGREGAR PANTALLA ---
 elif choice == "➕ Agregar Nueva":
-    st.header("Registrar Compatibilidad")
-    with st.form("form_registro"):
+    st.header("Registrar Nueva")
+    with st.form("f1"):
         marca = st.text_input("Marca")
         modelo = st.text_input("Modelo Base")
         compat = st.text_input("Compatibles")
-        notas = st.text_area("Observaciones")
-        if st.form_submit_button("Guardar en la Nube"):
-            if marca and modelo:
-                df_actual = cargar_datos_seguro("Pantallas", 0)
-                nuevo = pd.DataFrame([{"Marca": marca, "Modelo": modelo, "Compatibles": compat, "Notas": notas}])
-                df_final = pd.concat([df_actual, nuevo], ignore_index=True)
-                conn.update(worksheet="Pantallas", data=df_final)
-                st.success(f"¡{modelo} guardado!")
-            else:
-                st.error("Faltan datos.")
+        notas = st.text_area("Notas")
+        if st.form_submit_button("Guardar"):
+            df_act = cargar_datos("Pantallas")
+            nuevo = pd.DataFrame([{"Marca": marca, "Modelo": modelo, "Compatibles": compat, "Notas": notas}])
+            updated = pd.concat([df_act, nuevo], ignore_index=True)
+            conn.update(worksheet="Pantallas", data=updated)
+            st.success("Guardado.")
 
-# --- 3. HUESARIO (CORREGIDO) ---
+# --- 3. HUESARIO (SISTEMA DE DIAGNÓSTICO) ---
 elif choice == "🦴 Huesario / Partes":
-    st.header("Inventario de Partes (Huesario)")
+    st.header("Inventario de Partes")
     
-    # Intentamos cargar la segunda pestaña (índice 1)
-    df_h = cargar_datos_seguro("Huesario", 1)
+    df_h = cargar_datos("Huesario")
     
-    if df_h.empty:
-        st.warning("⚠️ No se pudieron cargar datos del Huesario.")
-        st.info("Asegúrate de que tu Google Sheets tenga una SEGUNDA pestaña con los títulos: Marca, Modelo, ID, Historial.")
+    if df_h is not None:
+        st.dataframe(df_h, use_container_width=True, hide_index=True)
     else:
-        df_h = df_h.dropna(how='all')
-        
-        tab_ver, tab_reg = st.tabs(["📋 Ver Inventario", "✍️ Registrar Entrada"])
-        
-        with tab_ver:
-            st.dataframe(df_h, use_container_width=True, hide_index=True)
-            
-        with tab_reg:
-            with st.form("hueso_nuevo"):
-                m = st.text_input("Marca")
-                mo = st.text_input("Modelo")
-                id_e = st.text_input("Color / ID único")
-                if st.form_submit_button("Agregar al Huesario"):
-                    if m and mo:
-                        fecha = datetime.now().strftime("%d/%m/%Y")
-                        nueva_fila = pd.DataFrame([{"Marca": m, "Modelo": mo, "ID": id_e, "Historial": f"[{fecha}] Ingreso."}])
-                        df_final_h = pd.concat([df_h, nueva_fila], ignore_index=True)
-                        conn.update(worksheet="Huesario", data=df_final_h)
-                        st.success("Equipo agregado al huesario.")
-                        st.rerun()
-                    else:
-                        st.error("Marca y Modelo son obligatorios.")
+        st.error("⚠️ Error técnico: La hoja 'Huesario' no responde.")
+        st.info("💡 **Monkey Fix Tips para solucionar esto:**")
+        st.write("1. **Escribe algo en el Excel:** Google a veces no entrega hojas que están vacías. Escribe un modelo de prueba en la segunda hoja.")
+        st.write("2. **Revisa el nombre:** Asegúrate que no tenga un espacio al final: 'Huesario ' vs 'Huesario'.")
+        st.write("3. **El Secreto:** Ve a Streamlit Cloud > Settings > Secrets y asegúrate de que el link NO termine en `#gid=...`. Debe terminar en `/edit?usp=sharing`.")
