@@ -6,80 +6,66 @@ from datetime import datetime
 
 st.set_page_config(page_title="Monkey Fix System", page_icon="🐒", layout="wide")
 
-# --- CONEXIÓN ---
-conn = st.connection("gsheets", type=GSheetsConnection)
-
 # --- LOGO ---
 try:
-    logo = Image.open("monkey_logo.png")
-    st.image(logo, width=150)
+    st.image("monkey_logo.png", width=150)
 except:
     st.title("🐒 MONKEY FIX / CELULARES 653")
 
-# --- MENÚ ---
-menu = ["🔍 Consultar Pantallas", "➕ Agregar Nueva", "🦴 Huesario / Partes"]
+# --- CONEXIÓN ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# --- NAVEGACIÓN ---
+menu = ["🔍 Consultar Pantallas", "➕ Agregar Nueva", "🦴 Huesario"]
 choice = st.sidebar.radio("Menú", menu)
 
-# --- 1. PANTALLAS ---
+# --- 1. CONSULTA ---
 if choice == "🔍 Consultar Pantallas":
     st.header("Buscador de Compatibilidades")
-    try:
-        # Leemos la primera hoja sin importar el nombre
-        df = conn.read(ttl=0) 
-        df = df.dropna(how='all')
-        busqueda = st.text_input("Buscar modelo...")
-        if busqueda:
-            mask = df.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)
-            st.dataframe(df[mask], use_container_width=True, hide_index=True)
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Error al conectar con Google: {e}")
+    # Leemos usando el link directo de los Secrets
+    df = conn.read(spreadsheet=st.secrets["links"]["pantallas"], ttl=0)
+    df = df.dropna(how='all')
+    
+    busqueda = st.text_input("Escribe el modelo:")
+    if busqueda:
+        mask = df.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)
+        st.dataframe(df[mask], use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-# --- 2. AGREGAR PANTALLA ---
+# --- 2. AGREGAR ---
 elif choice == "➕ Agregar Nueva":
     st.header("Registrar Nueva")
-    with st.form("f1"):
-        marca = st.text_input("Marca")
-        modelo = st.text_input("Modelo Base")
-        compat = st.text_input("Compatibles")
-        notas = st.text_area("Notas")
+    with st.form("f_add"):
+        marca, modelo, comp, notas = st.text_input("Marca"), st.text_input("Modelo"), st.text_input("Compatibles"), st.text_area("Notas")
         if st.form_submit_button("Guardar"):
-            if marca and modelo:
-                df_act = conn.read(ttl=0)
-                nuevo = pd.DataFrame([{"Marca": marca, "Modelo": modelo, "Compatibles": compat, "Notas": notas}])
-                updated = pd.concat([df_act, nuevo], ignore_index=True)
-                conn.update(data=updated) # Actualiza la primera hoja por defecto
-                st.success("Guardado en la nube.")
-            else:
-                st.warning("Marca y Modelo obligatorios.")
+            df_actual = conn.read(spreadsheet=st.secrets["links"]["pantallas"], ttl=0)
+            nuevo = pd.DataFrame([{"Marca": marca, "Modelo": modelo, "Compatibles": comp, "Notas": notas}])
+            updated = pd.concat([df_actual, nuevo], ignore_index=True)
+            conn.update(spreadsheet=st.secrets["links"]["pantallas"], data=updated)
+            st.success("Guardado exitosamente.")
 
-# --- 3. HUESARIO (CON AUTO-DETECCIÓN) ---
-elif choice == "🦴 Huesario / Partes":
-    st.header("Inventario de Partes")
-    
+# --- 3. HUESARIO (MÉTODO DIRECTO) ---
+elif choice == "🦴 Huesario":
+    st.header("Inventario de Huesario")
     try:
-        # TRUCO MAESTRO: Intentamos forzar la lectura de la hoja "Huesario"
-        # Si falla, el bloque 'except' nos dirá qué está pasando.
-        df_h = conn.read(worksheet="Huesario", ttl=0)
+        # Usamos el link específico del Huesario que tiene su propio GID
+        df_h = conn.read(spreadsheet=st.secrets["links"]["huesario"], ttl=0)
+        df_h = df_h.dropna(how='all')
         
-        if df_h is not None:
+        tab_v, tab_r = st.tabs(["📋 Ver Inventario", "✍️ Registrar"])
+        
+        with tab_v:
             st.dataframe(df_h, use_container_width=True, hide_index=True)
             
-            with st.expander("➕ Registrar nuevo en Huesario"):
-                with st.form("h2"):
-                    m, mo, id_e = st.text_input("Marca"), st.text_input("Modelo"), st.text_input("ID")
-                    if st.form_submit_button("Agregar"):
-                        fecha = datetime.now().strftime("%d/%m/%Y")
-                        nueva_fila = pd.DataFrame([{"Marca": m, "Modelo": mo, "ID": id_e, "Historial": f"[{fecha}] Ingreso."}])
-                        df_updated = pd.concat([df_h, nueva_fila], ignore_index=True)
-                        conn.update(worksheet="Huesario", data=df_updated)
-                        st.success("Agregado al Huesario.")
-        
+        with tab_r:
+            with st.form("f_h"):
+                m, mo, id_e = st.text_input("Marca"), st.text_input("Modelo"), st.text_input("ID")
+                if st.form_submit_button("Agregar"):
+                    fecha = datetime.now().strftime("%d/%m/%Y")
+                    fila = pd.DataFrame([{"Marca": m, "Modelo": mo, "ID": id_e, "Historial": f"[{fecha}] Ingreso."}])
+                    updated_h = pd.concat([df_h, fila], ignore_index=True)
+                    conn.update(spreadsheet=st.secrets["links"]["huesario"], data=updated_h)
+                    st.success("Hueso registrado.")
     except Exception as e:
-        st.error("No se pudo acceder a la pestaña 'Huesario'.")
-        st.info("🔎 **Diagnóstico para Monkey Fix:**")
-        st.write("Google Sheets envió este error: ", e)
-        st.write("---")
-        st.warning("⚠️ **Casi siempre es el link de los Secrets.**")
-        st.write("Asegúrate de que el link en Streamlit Cloud > Settings > Secrets sea el link de **COMPARTIR** (el que obtienes al darle al botón azul en Google Sheets) y que NO tenga el `#gid=0` al final.")
+        st.error("Error al cargar Huesario. Revisa el link en Secrets.")
