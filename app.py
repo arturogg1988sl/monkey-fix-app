@@ -11,7 +11,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # LOGO / TÍTULO
 try:
-    st.image("monkey_logo.png", width=150)
+    st.image("Monkey_logo.png", width=150)
 except:
     st.title("🐒 MONKEY FIX / CELULARES 653")
 
